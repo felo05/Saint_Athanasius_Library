@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>مكتبة البابا اثناسيوس</title>
+    <title>قاعدة بيانات الكتب</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -104,15 +104,14 @@
             line-height: 1.5;
         }
 
-        /* Search bar - stacked on mobile */
+        /* Search bar - just the text input */
         .search-bar {
             display: flex;
-            flex-direction: column;
-            gap: 8px;
             max-width: 700px;
             margin: 0 auto;
         }
 
+        /* Column filter + sort dropdowns, side by side */
         .controls-row {
             display: flex;
             gap: 8px;
@@ -120,7 +119,11 @@
             margin: 8px auto 0;
         }
 
-        .search-bar select,
+        .controls-row select {
+            flex: 1;
+            min-width: 0;
+        }
+
         .search-bar input,
         .controls-row select {
             padding: 13px 14px;
@@ -135,12 +138,18 @@
             width: 100%;
         }
 
-        .search-bar select,
         .controls-row select {
             cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            padding-left: 44px;
+            background-repeat: no-repeat;
+            background-position: left 16px center;
+            background-size: 15px;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
         }
 
-        .search-bar select:focus,
         .search-bar input:focus,
         .controls-row select:focus {
             border-color: var(--accent);
@@ -356,19 +365,6 @@
                 margin-bottom: 18px;
             }
 
-            .search-bar {
-                flex-direction: row;
-            }
-
-            .search-bar select {
-                flex: 0 0 160px;
-            }
-
-            .search-bar input {
-                flex: 1;
-                min-width: 0;
-            }
-
             .controls-row {
                 flex-direction: row;
             }
@@ -444,11 +440,11 @@
         </div>
 
         <div class="search-bar">
-            <select id="columnSelect"></select>
             <input type="text" id="searchInput" placeholder="ابحث...">
         </div>
 
         <div class="controls-row">
+            <select id="columnSelect"></select>
             <select id="sortSelect">
                 <option value="default">الترتيب الافتراضي</option>
                 <option value="title">ترتيب حسب العنوان</option>
