@@ -721,6 +721,8 @@
         // normIndex[i][j] = normalized text of allRows[i][headers[j]], built once
         // so searching doesn't re-normalize 7000+ rows on every keystroke.
         let normIndex = [];
+        // Location-number columns: still shown in book details, but not searchable
+        const NOT_SEARCHABLE = ["م. رف", "م. مجموعة", "م. التصنيف"];
         let modalRow = null;
 
         // Make Arabic search forgiving: ignore diacritics/tatweel and treat
@@ -773,7 +775,8 @@
 
                 allRows = parsed.data;
                 headers = (parsed.meta.fields || Object.keys(allRows[0] || {})).filter(h => h);
-                normIndex = allRows.map(row => headers.map(h => normalizeArabic(row[h])));
+                normIndex = allRows.map(row => headers.map(h =>
+                    NOT_SEARCHABLE.includes(h) ? '' : normalizeArabic(row[h])));
 
                 setupColumnDropdown();
                 restoreSavedState();
@@ -829,7 +832,8 @@
         function setupColumnDropdown() {
             const select = document.getElementById('columnSelect');
             select.innerHTML = `<option value="${ALL_COLUMNS_VALUE}">كل الأعمدة</option>` +
-                headers.map(h => `<option value="${h}">${h}</option>`).join("");
+                headers.filter(h => !NOT_SEARCHABLE.includes(h))
+                    .map(h => `<option value="${h}">${h}</option>`).join("");
         }
 
         function restoreSavedState() {
