@@ -106,9 +106,15 @@
             border-color: var(--accent);
         }
 
+        .stats-toggle {
+            left: auto;
+            right: 0;
+        }
+
         h2 {
             text-align: center;
             margin: 2px 0 14px;
+            padding: 0 44px;
             font-size: 17px;
             line-height: 1.5;
         }
@@ -405,6 +411,164 @@
             display: none !important;
         }
 
+        /* Statistics page - full-screen panel */
+        .stats-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1100;
+            background: var(--bg);
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .stats-header {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+            padding: 14px 12px;
+            box-shadow: 0 2px 6px var(--shadow);
+        }
+
+        .stats-header h3 {
+            margin: 0;
+            font-size: 18px;
+        }
+
+        .stats-header .modal-close {
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .stats-body {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 14px 12px calc(24px + env(safe-area-inset-bottom, 0px));
+        }
+
+        .stat-tiles {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        .stat-tile {
+            background: var(--surface);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            padding: 12px 14px;
+        }
+
+        .stat-tile .stat-value {
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--text);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .stat-tile .stat-label {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .stats-sections {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 14px;
+        }
+
+        .stats-section {
+            background: var(--surface);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            padding: 14px 16px 8px;
+        }
+
+        .stats-section h4 {
+            margin: 0 0 2px;
+            font-size: 16px;
+        }
+
+        .stats-section .stats-note {
+            font-size: 12px;
+            color: var(--text-faint);
+            margin-bottom: 8px;
+        }
+
+        /* One ranked bar per row: label + count, thin bar underneath */
+        .bar-row {
+            display: block;
+            width: 100%;
+            font: inherit;
+            text-align: right;
+            background: none;
+            border: none;
+            border-radius: 8px;
+            padding: 7px 4px;
+            margin: 0 -4px;
+            color: var(--text);
+            box-sizing: content-box;
+        }
+
+        button.bar-row {
+            cursor: pointer;
+        }
+
+        button.bar-row:hover,
+        button.bar-row:focus-visible {
+            background: var(--border-soft);
+            outline: none;
+        }
+
+        .bar-label {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .bar-label .bar-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .bar-label .bar-count {
+            color: var(--text-muted);
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            flex-shrink: 0;
+        }
+
+        .bar-track {
+            height: 8px;
+            border-radius: 4px;
+            background: var(--border-soft);
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            min-width: 2px;
+            border-radius: 4px;
+            background: var(--accent);
+        }
+
+        @media (min-width: 600px) {
+            .stat-tiles {
+                grid-template-columns: repeat(4, 1fr);
+            }
+
+            .stats-sections {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
         /* Small phones */
         @media (max-width: 360px) {
             h2 {
@@ -498,6 +662,7 @@
     <div class="top-bar">
         <div class="top-bar-header">
             <h2>كنيسة القديسة دميانة بالهرم<br>مكتبة البابا اثناسيوس الرسولى</h2>
+            <button class="theme-toggle stats-toggle" id="statsOpen" aria-label="إحصائيات المكتبة" title="إحصائيات المكتبة">📊</button>
             <button class="theme-toggle" id="themeToggle" aria-label="تبديل المظهر">🌙</button>
         </div>
 
@@ -527,6 +692,14 @@
             <div class="modal-title" id="modalTitle"></div>
             <div id="modalDetails"></div>
         </div>
+    </div>
+
+    <div class="stats-overlay hidden" id="statsOverlay" role="dialog" aria-labelledby="statsTitle">
+        <div class="stats-header">
+            <h3 id="statsTitle">إحصائيات المكتبة</h3>
+            <button class="modal-close" id="statsClose" aria-label="إغلاق">✕</button>
+        </div>
+        <div class="stats-body" id="statsBody"></div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
@@ -704,13 +877,16 @@
             const column = document.getElementById('columnSelect').value;
             const sortMode = document.getElementById('sortSelect').value;
 
+            // Every word must match, in any order (and, for "all columns",
+            // in any column): "تفسير شنوده" finds "البابا شنوده ... تفسير".
             let filtered = allRows;
-            if (query) {
+            const words = query ? query.split(' ') : [];
+            if (words.length) {
                 const colIdx = headers.indexOf(column);
                 filtered = allRows.filter((row, i) => {
                     const norm = normIndex[i];
-                    if (colIdx === -1) return norm.some(v => v.includes(query));
-                    return norm[colIdx].includes(query);
+                    if (colIdx === -1) return words.every(w => norm.some(v => v.includes(w)));
+                    return words.every(w => norm[colIdx].includes(w));
                 });
             }
 
@@ -799,8 +975,15 @@
             const link = e.target.closest('.detail-link');
             if (!link || !modalRow) return;
             const field = headers[parseInt(link.getAttribute('data-field'), 10)];
-            const value = (modalRow[field] || '').toString().trim();
-            if (!field || !value) return;
+            closeModal();
+            browseTo(field, modalRow[field]);
+        });
+
+        // Show every book whose `field` matches `value` (used by the book
+        // details links and the statistics page).
+        function browseTo(field, rawValue) {
+            const value = (rawValue || '').toString().trim();
+            if (!headers.includes(field) || !value) return;
 
             document.getElementById('columnSelect').value = field;
             document.getElementById('searchInput').value = value;
@@ -808,9 +991,132 @@
                 document.getElementById('sortSelect').value = 'title';
             }
             updateClearButton();
-            closeModal();
             refreshResults();
             window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // ---------- Statistics page ----------
+        const CATEGORY_LETTER_FIELD = "التصنيف";
+        const CATEGORY_FIELD = "تصنيف الكتاب";
+        const PUBLISHER_FIELD = "الناشر";
+        const SERIES_FIELD = "السلسلة";
+        const TRANSLATOR_FIELD = "اسم المترجم";
+        let statsBuilt = false;
+
+        // Count values of a field. Spelling variants (شنوده / شنودة) are counted
+        // together; the most common spelling is the one displayed.
+        function countField(field) {
+            const groups = new Map();
+            allRows.forEach(row => {
+                const raw = (row[field] || '').toString().replace(/\s+/g, ' ').trim();
+                if (!raw) return;
+                const key = normalizeArabic(raw);
+                let g = groups.get(key);
+                if (!g) groups.set(key, g = { count: 0, spellings: new Map() });
+                g.count++;
+                g.spellings.set(raw, (g.spellings.get(raw) || 0) + 1);
+            });
+            return [...groups.values()]
+                .map(g => ({
+                    label: [...g.spellings.entries()].sort((a, b) => b[1] - a[1])[0][0],
+                    count: g.count
+                }))
+                .sort((a, b) => b.count - a.count);
+        }
+
+        function barList(items, field) {
+            const max = Math.max(...items.map(i => i.count), 1);
+            return items.map(item => {
+                const tag = field ? 'button' : 'div';
+                const attrs = field
+                    ? ` type="button" data-field="${headers.indexOf(field)}" data-value="${escapeHtml(item.label)}"
+                        title="عرض الكتب: ${escapeHtml(item.label)}"`
+                    : '';
+                return `<${tag} class="bar-row"${attrs}>
+                    <div class="bar-label">
+                        <span class="bar-name">${escapeHtml(item.label)}</span>
+                        <span class="bar-count">${item.count.toLocaleString('ar-EG')}</span>
+                    </div>
+                    <div class="bar-track"><div class="bar-fill" style="width:${(item.count / max * 100).toFixed(1)}%"></div></div>
+                </${tag}>`;
+            }).join('');
+        }
+
+        function statsSection(title, note, items, field) {
+            if (!items.length) return '';
+            return `<section class="stats-section">
+                <h4>${title}</h4>
+                <div class="stats-note">${note}</div>
+                ${barList(items, field)}
+            </section>`;
+        }
+
+        function buildStats() {
+            const fmt = n => n.toLocaleString('ar-EG');
+            const authors = countField(AUTHOR_FIELD);
+            const publishers = countField(PUBLISHER_FIELD);
+            const series = countField(SERIES_FIELD);
+            const categories = countField(CATEGORY_FIELD);
+            const translated = allRows.filter(r => (r[TRANSLATOR_FIELD] || '').trim()).length;
+
+            const letters = countField(CATEGORY_LETTER_FIELD)
+                .sort((a, b) => a.label.localeCompare(b.label, 'ar'));
+
+            // Books per decade, in time order; invalid years are skipped
+            const decades = new Map();
+            allRows.forEach(row => {
+                const y = parseInt(normalizeArabic(row[YEAR_FIELD]), 10);
+                if (!(y >= 1000 && y <= 2100)) return;
+                const d = Math.floor(y / 10) * 10;
+                decades.set(d, (decades.get(d) || 0) + 1);
+            });
+            const decadeItems = [...decades.entries()]
+                .sort((a, b) => b[0] - a[0])
+                // \u2066...\u2069 keeps "1990–1999" left-to-right inside the Arabic layout
+                .map(([d, count]) => ({ label: `\u2066${d}–${d + 9}\u2069`, count }));
+
+            const tiles = [
+                [fmt(allRows.length), 'كتاب'],
+                [fmt(authors.length), 'مؤلف'],
+                [fmt(publishers.length), 'ناشر'],
+                [fmt(translated), 'كتاب مترجم']
+            ].map(([v, l]) => `<div class="stat-tile"><div class="stat-value">${v}</div><div class="stat-label">${l}</div></div>`).join('');
+
+            const tapNote = 'اضغط على أي اسم لعرض كتبه';
+            document.getElementById('statsBody').innerHTML =
+                `<div class="stat-tiles">${tiles}</div>
+                <div class="stats-sections">
+                    ${statsSection('أكثر المؤلفين كتبًا', tapNote, authors.slice(0, 10), AUTHOR_FIELD)}
+                    ${statsSection('أكثر التصنيفات', tapNote, categories.slice(0, 10), CATEGORY_FIELD)}
+                    ${statsSection('أكثر الناشرين', tapNote, publishers.slice(0, 10), PUBLISHER_FIELD)}
+                    ${statsSection('أكبر السلاسل', tapNote, series.slice(0, 10), SERIES_FIELD)}
+                    ${statsSection('الكتب حسب التصنيف (الحرف)', tapNote, letters, CATEGORY_LETTER_FIELD)}
+                    ${statsSection('الكتب حسب عقد النشر', 'الأحدث أولًا', decadeItems, null)}
+                </div>`;
+            statsBuilt = true;
+        }
+
+        function openStats() {
+            if (!allRows.length) return;
+            if (!statsBuilt) buildStats();
+            const overlay = document.getElementById('statsOverlay');
+            overlay.classList.remove('hidden');
+            overlay.scrollTop = 0;
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeStats() {
+            document.getElementById('statsOverlay').classList.add('hidden');
+            document.body.style.overflow = '';
+        }
+
+        document.getElementById('statsOpen').addEventListener('click', openStats);
+        document.getElementById('statsClose').addEventListener('click', closeStats);
+        document.getElementById('statsBody').addEventListener('click', (e) => {
+            const row = e.target.closest('button.bar-row');
+            if (!row) return;
+            closeStats();
+            browseTo(headers[parseInt(row.getAttribute('data-field'), 10)], row.getAttribute('data-value'));
         });
 
         function closeModal() {
@@ -822,7 +1128,7 @@
             if (e.target.id === 'modalOverlay') closeModal();
         });
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeModal();
+            if (e.key === 'Escape') { closeModal(); closeStats(); }
         });
 
         const themeToggleBtn = document.getElementById('themeToggle');
@@ -841,7 +1147,9 @@
             return String(str)
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         loadData();
