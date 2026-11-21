@@ -350,6 +350,66 @@
             display: none;
         }
 
+        /* Autocomplete suggestions under the search box */
+        .suggestions {
+            position: absolute;
+            top: calc(100% + 6px);
+            right: 0;
+            left: 0;
+            z-index: 600;
+            margin: 0;
+            padding: 6px;
+            list-style: none;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 8px 24px var(--shadow);
+            max-height: min(55vh, 380px);
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .suggestion {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 10px;
+            min-height: 44px;
+            border-radius: 8px;
+            cursor: pointer;
+            color: var(--text);
+        }
+
+        .suggestion.active,
+        .suggestion:hover {
+            background: var(--border-soft);
+        }
+
+        .suggestion-text {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 15px;
+        }
+
+        .suggestion-field {
+            flex-shrink: 0;
+            font-size: 12px;
+            color: var(--text-muted);
+            background: var(--bg);
+            border-radius: 6px;
+            padding: 2px 8px;
+        }
+
+        .suggestion-count {
+            flex-shrink: 0;
+            font-size: 12px;
+            color: var(--text-faint);
+            font-variant-numeric: tabular-nums;
+        }
+
         .search-clear {
             position: absolute;
             left: 8px;
@@ -667,8 +727,10 @@
         </div>
 
         <div class="search-bar">
-            <input type="search" id="searchInput" placeholder="ابحث..." enterkeyhint="search" autocomplete="off">
+            <input type="search" id="searchInput" placeholder="ابحث..." enterkeyhint="search" autocomplete="off"
+                role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions">
             <button class="search-clear hidden" id="searchClear" aria-label="مسح البحث">✕</button>
+            <ul class="suggestions hidden" id="suggestions" role="listbox"></ul>
         </div>
 
         <div class="controls-row">
@@ -793,6 +855,7 @@
                 const debouncedRefresh = debounce(refreshResults, 200);
                 document.getElementById('searchInput').addEventListener('input', () => {
                     updateClearButton();
+                    updateSuggestions();
                     debouncedRefresh();
                 });
                 document.getElementById('searchClear').addEventListener('click', () => {
@@ -800,11 +863,16 @@
                     input.value = '';
                     document.getElementById('columnSelect').value = ALL_COLUMNS_VALUE;
                     updateClearButton();
+                    hideSuggestions();
                     refreshResults();
                     input.focus();
                 });
                 updateClearButton();
-                document.getElementById('columnSelect').addEventListener('change', refreshResults);
+                setupSuggestions();
+                document.getElementById('columnSelect').addEventListener('change', () => {
+                    hideSuggestions();
+                    refreshResults();
+                });
                 document.getElementById('sortSelect').addEventListener('change', refreshResults);
 
                 document.getElementById('loadingContainer').classList.add('hidden');
@@ -997,6 +1065,135 @@
             updateClearButton();
             refreshResults();
             window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // ---------- Search suggestions ----------
+        // Suggest existing values of the chosen column while typing. No
+        // suggestions when searching by book title. In "all columns" mode,
+        // values come from every searchable column except the title and the
+        // part/edition numbers, and each one shows which column it's from.
+        const MAX_SUGGESTIONS = 8;
+        const NO_SUGGEST_IN_ALL = ["الجزء", "الطبعة"];
+        const suggestCache = new Map();   // field -> [{label, norm, count}]
+        let suggestItems = [];
+        let suggestActive = -1;
+
+        function suggestValues(field) {
+            if (!suggestCache.has(field)) {
+                suggestCache.set(field, countField(field).map(v => ({
+                    ...v, field, norm: normalizeArabic(v.label)
+                })));
+            }
+            return suggestCache.get(field);
+        }
+
+        function findSuggestions(rawQuery, column) {
+            const query = normalizeArabic(rawQuery);
+            if (!query || column === TITLE_FIELD) return [];
+            const isAll = column === ALL_COLUMNS_VALUE;
+            if (isAll && query.length < 2) return [];
+
+            const fields = isAll
+                ? headers.filter(h => h !== TITLE_FIELD && !NOT_SEARCHABLE.includes(h) && !NO_SUGGEST_IN_ALL.includes(h))
+                : [column];
+            const words = query.split(' ');
+
+            const matches = [];
+            fields.forEach(field => {
+                suggestValues(field).forEach(v => {
+                    if (!words.every(w => v.norm.includes(w))) return;
+                    // Rank: a word starts with what was typed > match inside a word;
+                    // then the most books first
+                    const rank = (' ' + v.norm).includes(' ' + words[0]) ? 0 : 1;
+                    matches.push({ ...v, rank });
+                });
+            });
+            return matches
+                .filter(m => m.norm !== query || isAll)   // don't suggest exactly what's typed
+                .sort((a, b) => a.rank - b.rank || b.count - a.count)
+                .slice(0, MAX_SUGGESTIONS);
+        }
+
+        function updateSuggestions() {
+            const input = document.getElementById('searchInput');
+            const column = document.getElementById('columnSelect').value;
+            suggestItems = findSuggestions(input.value, column);
+            suggestActive = -1;
+            const list = document.getElementById('suggestions');
+            if (!suggestItems.length) return hideSuggestions();
+
+            const isAll = column === ALL_COLUMNS_VALUE;
+            list.innerHTML = suggestItems.map((s, i) => `
+                <li class="suggestion" role="option" id="sugg-${i}" data-i="${i}">
+                    <span class="suggestion-text">${escapeHtml(s.label)}</span>
+                    ${isAll ? `<span class="suggestion-field">${escapeHtml(s.field)}</span>` : ''}
+                    <span class="suggestion-count">${s.count.toLocaleString('ar-EG')}</span>
+                </li>`).join('');
+            list.classList.remove('hidden');
+            input.setAttribute('aria-expanded', 'true');
+            input.removeAttribute('aria-activedescendant');
+        }
+
+        function hideSuggestions() {
+            const input = document.getElementById('searchInput');
+            document.getElementById('suggestions').classList.add('hidden');
+            input.setAttribute('aria-expanded', 'false');
+            input.removeAttribute('aria-activedescendant');
+            suggestItems = [];
+            suggestActive = -1;
+        }
+
+        function setActiveSuggestion(i) {
+            const items = document.querySelectorAll('#suggestions .suggestion');
+            items.forEach(el => el.classList.remove('active'));
+            suggestActive = i;
+            if (i >= 0 && items[i]) {
+                items[i].classList.add('active');
+                items[i].scrollIntoView({ block: 'nearest' });
+                document.getElementById('searchInput').setAttribute('aria-activedescendant', items[i].id);
+            }
+        }
+
+        function chooseSuggestion(i) {
+            const s = suggestItems[i];
+            if (!s) return;
+            hideSuggestions();
+            const sortSelect = document.getElementById('sortSelect');
+            const prevSort = sortSelect.value;
+            browseTo(s.field, s.label);
+            sortSelect.value = prevSort;   // keep the visitor's chosen order
+            refreshResults();
+            document.getElementById('searchInput').blur();   // close the phone keyboard
+        }
+
+        function setupSuggestions() {
+            const input = document.getElementById('searchInput');
+            const list = document.getElementById('suggestions');
+
+            input.addEventListener('focus', () => { if (input.value) updateSuggestions(); });
+            input.addEventListener('blur', () => setTimeout(hideSuggestions, 150));
+            input.addEventListener('keydown', (e) => {
+                if (list.classList.contains('hidden')) return;
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setActiveSuggestion((suggestActive + 1) % suggestItems.length);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setActiveSuggestion(suggestActive <= 0 ? suggestItems.length - 1 : suggestActive - 1);
+                } else if (e.key === 'Enter') {
+                    if (suggestActive >= 0) { e.preventDefault(); chooseSuggestion(suggestActive); }
+                    else hideSuggestions();
+                } else if (e.key === 'Escape') {
+                    e.stopPropagation();
+                    hideSuggestions();
+                }
+            });
+            // mousedown (not click) so it fires before the input loses focus
+            list.addEventListener('mousedown', (e) => e.preventDefault());
+            list.addEventListener('click', (e) => {
+                const item = e.target.closest('.suggestion');
+                if (item) chooseSuggestion(parseInt(item.getAttribute('data-i'), 10));
+            });
         }
 
         // ---------- Statistics page ----------
