@@ -5,6 +5,15 @@
     <meta charset="UTF-8">
     <title>قاعدة بيانات الكتب</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="description" content="فهرس كتب مكتبة البابا أثناسيوس الرسولي - كنيسة القديسة دميانة بالهرم">
+    <meta name="theme-color" content="#1f3a5f">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="المكتبة">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -297,6 +306,59 @@
             text-align: right;
         }
 
+        /* Tappable values (author, series, ...) that open all matching books */
+        .detail-link {
+            font: inherit;
+            font-weight: 600;
+            color: var(--accent);
+            background: none;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            text-align: inherit;
+            text-decoration: underline;
+            text-underline-offset: 4px;
+        }
+
+        .detail-link::after {
+            content: " ←";
+            text-decoration: none;
+            display: inline-block;
+            margin-right: 4px;
+        }
+
+        .search-bar {
+            position: relative;
+        }
+
+        .search-bar input {
+            padding-left: 44px;
+        }
+
+        .search-bar input[type="search"] {
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        .search-bar input[type="search"]::-webkit-search-cancel-button {
+            display: none;
+        }
+
+        .search-clear {
+            position: absolute;
+            left: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 30px;
+            height: 30px;
+            border: none;
+            border-radius: 50%;
+            background: var(--border-soft);
+            color: var(--text-muted);
+            font-size: 14px;
+            cursor: pointer;
+        }
+
         /* Loading */
         .loading-container {
             position: fixed;
@@ -440,7 +502,8 @@
         </div>
 
         <div class="search-bar">
-            <input type="text" id="searchInput" placeholder="ابحث...">
+            <input type="search" id="searchInput" placeholder="ابحث..." enterkeyhint="search" autocomplete="off">
+            <button class="search-clear hidden" id="searchClear" aria-label="مسح البحث">✕</button>
         </div>
 
         <div class="controls-row">
@@ -476,9 +539,37 @@
         const PAGE_SIZE = 24;
         const STORAGE_KEY = "lib_search_state";
         const THEME_KEY = "lib_theme";
+        // Fields shown as tappable links in the book details: tapping one
+        // lists every book with the same author / series / publisher...
+        const BROWSABLE_FIELDS = ["اسم المؤلف", "اسم المترجم", "السلسلة", "الناشر", "تصنيف الكتاب"];
 
         let allRows = [];
         let headers = [];
+        // normIndex[i][j] = normalized text of allRows[i][headers[j]], built once
+        // so searching doesn't re-normalize 7000+ rows on every keystroke.
+        let normIndex = [];
+        let modalRow = null;
+
+        // Make Arabic search forgiving: ignore diacritics/tatweel and treat
+        // common spelling variants as the same letter.
+        function normalizeArabic(value) {
+            return String(value || '')
+                .toLowerCase()
+                .replace(/[ً-ٰٟـ]/g, '')   // tashkeel, superscript alef, tatweel
+                .replace(/[أإآٱ]/g, 'ا')
+                .replace(/ة/g, 'ه')
+                .replace(/ى/g, 'ي')
+                .replace(/ؤ/g, 'و')
+                .replace(/ئ/g, 'ي')
+                .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)) // Arabic-Indic digits
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        // CSV headers contain line breaks (e.g. "سنة\nالنشر"); turn them into spaces.
+        function cleanHeader(h) {
+            return h.replace(/^﻿/, '').replace(/\s+/g, ' ').trim();
+        }
         let currentRows = [];
         let renderedCount = 0;
         let scrollObserver = null;
@@ -503,11 +594,13 @@
 
                 const parsed = Papa.parse(csvText, {
                     header: true,
-                    skipEmptyLines: true
+                    skipEmptyLines: true,
+                    transformHeader: cleanHeader
                 });
 
                 allRows = parsed.data;
-                headers = Object.keys(allRows[0] || {});
+                headers = (parsed.meta.fields || Object.keys(allRows[0] || {})).filter(h => h);
+                normIndex = allRows.map(row => headers.map(h => normalizeArabic(row[h])));
 
                 setupColumnDropdown();
                 restoreSavedState();
@@ -522,7 +615,19 @@
                 refreshResults();
 
                 const debouncedRefresh = debounce(refreshResults, 200);
-                document.getElementById('searchInput').addEventListener('input', debouncedRefresh);
+                document.getElementById('searchInput').addEventListener('input', () => {
+                    updateClearButton();
+                    debouncedRefresh();
+                });
+                document.getElementById('searchClear').addEventListener('click', () => {
+                    const input = document.getElementById('searchInput');
+                    input.value = '';
+                    document.getElementById('columnSelect').value = ALL_COLUMNS_VALUE;
+                    updateClearButton();
+                    refreshResults();
+                    input.focus();
+                });
+                updateClearButton();
                 document.getElementById('columnSelect').addEventListener('change', refreshResults);
                 document.getElementById('sortSelect').addEventListener('change', refreshResults);
 
@@ -558,7 +663,9 @@
             try {
                 const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
                 if (saved.query) document.getElementById('searchInput').value = saved.query;
-                if (saved.column) document.getElementById('columnSelect').value = saved.column;
+                const columnSelect = document.getElementById('columnSelect');
+                if (saved.column) columnSelect.value = cleanHeader(saved.column);
+                if (columnSelect.selectedIndex < 0) columnSelect.value = ALL_COLUMNS_VALUE;
                 if (saved.sort) document.getElementById('sortSelect').value = saved.sort;
             } catch (e) { }
         }
@@ -577,23 +684,33 @@
                 return [...rows].sort((a, b) => (a[AUTHOR_FIELD] || '').localeCompare(b[AUTHOR_FIELD] || '', 'ar'));
             }
             if (mode === 'year') {
-                return [...rows].sort((a, b) => (parseInt(b[YEAR_FIELD]) || 0) - (parseInt(a[YEAR_FIELD]) || 0));
+                // Newest first; missing or invalid years (typos like "19962") go last.
+                const year = (row) => {
+                    const y = parseInt(normalizeArabic(row[YEAR_FIELD]), 10);
+                    return y >= 1000 && y <= 2100 ? y : 0;
+                };
+                return [...rows].sort((a, b) => year(b) - year(a));
             }
             return rows;
         }
 
+        function updateClearButton() {
+            const hasText = document.getElementById('searchInput').value !== '';
+            document.getElementById('searchClear').classList.toggle('hidden', !hasText);
+        }
+
         function refreshResults() {
-            const query = document.getElementById('searchInput').value.trim().toLowerCase();
+            const query = normalizeArabic(document.getElementById('searchInput').value);
             const column = document.getElementById('columnSelect').value;
             const sortMode = document.getElementById('sortSelect').value;
 
             let filtered = allRows;
             if (query) {
-                filtered = allRows.filter(row => {
-                    if (column === ALL_COLUMNS_VALUE) {
-                        return headers.some(h => (row[h] || '').toString().toLowerCase().includes(query));
-                    }
-                    return (row[column] || '').toString().toLowerCase().includes(query);
+                const colIdx = headers.indexOf(column);
+                filtered = allRows.filter((row, i) => {
+                    const norm = normIndex[i];
+                    if (colIdx === -1) return norm.some(v => v.includes(query));
+                    return norm[colIdx].includes(query);
                 });
             }
 
@@ -656,19 +773,45 @@
         }
 
         function openModal(row) {
+            modalRow = row;
             const modal = document.getElementById('modalOverlay');
             document.getElementById('modalTitle').textContent = row[TITLE_FIELD] || 'تفاصيل الكتاب';
 
             const details = headers
                 .filter(h => h !== TITLE_FIELD && (row[h] || '').toString().trim() !== '')
-                .map(h => `<div class="detail-row">
-                    <span class="detail-label">${escapeHtml(h)}</span>
-                    <span class="detail-value">${escapeHtml(row[h])}</span>
-                </div>`).join("");
+                .map(h => {
+                    const value = BROWSABLE_FIELDS.includes(h)
+                        ? `<button type="button" class="detail-link" data-field="${headers.indexOf(h)}"
+                               title="عرض كل الكتب: ${escapeHtml(row[h])}">${escapeHtml(row[h])}</button>`
+                        : `<span class="detail-value">${escapeHtml(row[h])}</span>`;
+                    return `<div class="detail-row">
+                        <span class="detail-label">${escapeHtml(h)}</span>
+                        ${value}
+                    </div>`;
+                }).join("");
 
             document.getElementById('modalDetails').innerHTML = details || '<div class="detail-row">لا توجد تفاصيل إضافية</div>';
             modal.classList.remove('hidden');
         }
+
+        // Tap an author / series / publisher in the details to list all their books
+        document.getElementById('modalDetails').addEventListener('click', (e) => {
+            const link = e.target.closest('.detail-link');
+            if (!link || !modalRow) return;
+            const field = headers[parseInt(link.getAttribute('data-field'), 10)];
+            const value = (modalRow[field] || '').toString().trim();
+            if (!field || !value) return;
+
+            document.getElementById('columnSelect').value = field;
+            document.getElementById('searchInput').value = value;
+            if (document.getElementById('sortSelect').value === 'default') {
+                document.getElementById('sortSelect').value = 'title';
+            }
+            updateClearButton();
+            closeModal();
+            refreshResults();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
 
         function closeModal() {
             document.getElementById('modalOverlay').classList.add('hidden');
@@ -677,6 +820,9 @@
         document.getElementById('modalClose').addEventListener('click', closeModal);
         document.getElementById('modalOverlay').addEventListener('click', (e) => {
             if (e.target.id === 'modalOverlay') closeModal();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
         });
 
         const themeToggleBtn = document.getElementById('themeToggle');

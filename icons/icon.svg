@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#1f3a5f"/>
+  <!-- open book -->
+  <path d="M256 170c-40-30-96-40-150-34v220c54-6 110 4 150 34z" fill="#f4f5f7"/>
+  <path d="M256 170c40-30 96-40 150-34v220c-54-6-110 4-150 34z" fill="#dfe6ee"/>
+  <path d="M256 170v220" stroke="#1f3a5f" stroke-width="8"/>
+  <!-- cross -->
+  <path d="M256 70v80M226 98h60" stroke="#e8b54a" stroke-width="18" stroke-linecap="round"/>
+</svg>

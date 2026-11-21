@@ -1,8 +1,13 @@
-const CACHE_NAME = 'library-cache-v2';
+const CACHE_NAME = 'library-cache-v3';
 const CORE_ASSETS = [
     './',
     './index.html',
-    './data.csv'
+    './data.csv',
+    './manifest.json',
+    './icons/icon.svg',
+    './icons/icon-192.png',
+    './icons/icon-512.png',
+    './icons/apple-touch-icon.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -25,9 +30,10 @@ self.addEventListener('fetch', (event) => {
     const { request } = event;
     if (request.method !== 'GET') return;
 
-    // Network-first for the book data, so visitors get the latest list
-    // whenever they're online, but still see the last-known list offline.
-    if (request.url.endsWith('data.csv')) {
+    // Network-first for the page itself and the book data, so visitors get
+    // the latest version whenever they're online, but still work offline.
+    const isPage = request.mode === 'navigate';
+    if (isPage || new URL(request.url).pathname.endsWith('data.csv')) {
         event.respondWith(
             fetch(request)
                 .then((response) => {
@@ -35,7 +41,8 @@ self.addEventListener('fetch', (event) => {
                     caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
                     return response;
                 })
-                .catch(() => caches.match(request))
+                .catch(() => caches.match(request).then((cached) =>
+                    cached || (isPage ? caches.match('./index.html') : undefined)))
         );
         return;
     }
