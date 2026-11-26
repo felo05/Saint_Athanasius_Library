@@ -219,6 +219,20 @@
             color: var(--text-muted);
         }
 
+        /* Part / volume number next to the title ("ج1") */
+        .part-badge {
+            display: inline-block;
+            margin-right: 6px;
+            padding: 0 8px;
+            border-radius: 6px;
+            background: var(--accent-soft);
+            color: var(--text);
+            font-size: 13px;
+            font-weight: 700;
+            vertical-align: 2px;
+            white-space: nowrap;
+        }
+
         .no-results {
             text-align: center;
             color: var(--text-faint);
@@ -770,6 +784,14 @@
         const TITLE_FIELD = "اسم الكتاب";
         const AUTHOR_FIELD = "اسم المؤلف";
         const YEAR_FIELD = "سنة النشر";
+        const PART_FIELD = "الجزء";
+
+        // "1" -> "ج1", "1، 2" -> "ج1، 2"; non-numeric parts (e.g. months) as written
+        function partLabel(row) {
+            const part = (row[PART_FIELD] || '').toString().trim();
+            if (!part) return '';
+            return /^\d/.test(part) ? 'ج' + part : part;
+        }
         const ALL_COLUMNS_VALUE = "__ALL__";
         const PAGE_SIZE = 24;
         const STORAGE_KEY = "lib_search_state";
@@ -837,8 +859,13 @@
 
                 allRows = parsed.data;
                 headers = (parsed.meta.fields || Object.keys(allRows[0] || {})).filter(h => h);
-                normIndex = allRows.map(row => headers.map(h =>
-                    NOT_SEARCHABLE.includes(h) ? '' : normalizeArabic(row[h])));
+                // The part column is also indexed as "ج1" so searching "متى ج1" still works
+                // now that part numbers are no longer repeated in titles.
+                normIndex = allRows.map(row => headers.map(h => {
+                    if (NOT_SEARCHABLE.includes(h)) return '';
+                    const v = normalizeArabic(row[h]);
+                    return h === PART_FIELD && v ? `${v} ${normalizeArabic(partLabel(row))}` : v;
+                }));
 
                 setupColumnDropdown();
                 restoreSavedState();
@@ -993,8 +1020,10 @@
                 const idx = renderedCount + i;
                 const title = row[TITLE_FIELD] || 'بدون عنوان';
                 const author = row[AUTHOR_FIELD] || '';
+                const part = partLabel(row);
+                const badge = part ? `<span class="part-badge">${escapeHtml(part)}</span>` : '';
                 return `<div class="book-card" data-index="${idx}">
-                    <div class="book-title">${escapeHtml(title)}</div>
+                    <div class="book-title">${escapeHtml(title)}${badge}</div>
                     <div class="book-author">${escapeHtml(author)}</div>
                 </div>`;
             }).join("");
@@ -1172,6 +1201,12 @@
 
             input.addEventListener('focus', () => { if (input.value) updateSuggestions(); });
             input.addEventListener('blur', () => setTimeout(hideSuggestions, 150));
+            // Esc in a search box clears it natively ("search" event): update the results too
+            input.addEventListener('search', () => {
+                updateClearButton();
+                hideSuggestions();
+                refreshResults();
+            });
             input.addEventListener('keydown', (e) => {
                 if (list.classList.contains('hidden')) return;
                 if (e.key === 'ArrowDown') {
@@ -1184,6 +1219,7 @@
                     if (suggestActive >= 0) { e.preventDefault(); chooseSuggestion(suggestActive); }
                     else hideSuggestions();
                 } else if (e.key === 'Escape') {
+                    e.preventDefault();      // first Esc only closes the list, keeps the text
                     e.stopPropagation();
                     hideSuggestions();
                 }
