@@ -27,6 +27,8 @@ What it does
   * الجزء: 'ج1' -> '1'; lists of parts written '1\\2', '1,2', '1 & 2', ...
     -> '1، 2'; repairs values Excel turned into dates/times.
   * م. رف: tidy shelf codes ('د12- 1' -> 'د12-1').
+  * Person titles always take "ال" (دكتور -> الدكتور); values that differ only
+    by "ال" (بالهرم / الهرم) are variants too, except in book titles.
   * سنة النشر: fix clear typos (19962 -> 1996, 78 -> 1978, 88 -> 1988).
     Other impossible years are left as they are and listed in the report.
 """
@@ -64,6 +66,20 @@ PREFERRED_SPELLINGS = {
     "مكتبة كنيسة الإخوة",
     "مكتبة الإخوة",
 }
+# Person titles always take "ال" (دكتور -> الدكتور, أسقف عام -> الأسقف العام),
+# like القمص / القس / الأب. Only entries made up entirely of titles are changed:
+# "أسقف الغربية" / "مطران دمياط" / "أستاذ اللاهوت" (title + what it belongs to)
+# can't take "ال" in Arabic, so they stay as written.
+TITLE_COLUMNS = {"لقب المؤلف", "لقب المترجم"}
+TITLE_WORDS = {
+    "دكتور", "دكتورة", "أسقف", "اسقف", "دياكون", "مطران", "عام", "مهندس", "أستاذ",
+    "استاذ", "أرشيدياكون", "ارشيدياكون", "راهب", "اكليريكي", "إكليريكي", "أغنسطس",
+    "اغنسطس", "شماس", "خادم", "مدرس", "خوري", "بطريرك",
+}
+# Titles that already carry "ال" and may appear in an all-title entry
+AL_TITLES = {"القس", "القمص", "الأب", "الاب", "البطريرك", "الشماس", "الدكتور", "الدكتورة",
+             "الأستاذ", "الاستاذ", "المهندس", "الدياكون", "الأرشيدياكون", "الراهب",
+             "الأسقف", "الاسقف", "العام", "الإكليريكي", "الاكليريكي", "المتنيح"}
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
 
@@ -112,10 +128,28 @@ def variant_key(value):
     return v
 
 
+def strip_al_key(value):
+    """Like variant_key, but also ignores a leading ال / بال / وال / لل on each
+    word, so "بالهرم" ~ "الهرم" and "سير قديسين" ~ "سير القديسين"."""
+    return " ".join(re.sub(r"^(ال|بال|وال|لل)(?=\S\S)", "", w) for w in variant_key(value).split())
+
+
+def add_al_to_titles(value):
+    entries = []
+    for entry in value.split("، "):
+        words = entry.split(" ")
+        all_titles = all(w in TITLE_WORDS or w in AL_TITLES or w == "-" for w in words)
+        if all_titles:
+            words = ["ال" + w if w in TITLE_WORDS else w for w in words]
+        entries.append(" ".join(words))
+    return "، ".join(entries)
+
+
 def spelling_score(value):
     """Tie-breaker when two spellings are equally common: prefer written
     hamza and ة, then standard spacing around ' - '."""
     return (
+        len(re.findall(r"(^|\s)ال", value)),
         len(re.findall("[أإآؤئ]", value)),
         value.count("ة"),
         value.count(" - "),
@@ -180,10 +214,13 @@ def main():
         "الجزء": clean_parts,
         "م. رف": clean_shelf,
         "سنة النشر": lambda v: YEAR_FIXES.get(v, v),
+        "لقب المؤلف": add_al_to_titles,
+        "لقب المترجم": add_al_to_titles,
     }
     reasons = {
         "التصنيف": "category letter", "الطبعة": "edition as number", "الجزء": "part format",
         "م. رف": "shelf code format", "سنة النشر": "year typo",
+        "لقب المؤلف": "title with ال", "لقب المترجم": "title with ال",
     }
     for name, fn in special.items():
         if name not in col:
@@ -204,11 +241,13 @@ def main():
     ]
     for names in groups:
         js = [col[n] for n in names if n in col]
+        # Book titles keep their exact wording; elsewhere "ال" differences are variants
+        key_fn = variant_key if names == ("اسم الكتاب",) else strip_al_key
         counts = collections.defaultdict(collections.Counter)
         for row in data:
             for j in js:
                 if row[j]:
-                    counts[variant_key(row[j])][row[j]] += 1
+                    counts[key_fn(row[j])][row[j]] += 1
         canonical = {}
         for key, spellings in counts.items():
             if len(spellings) > 1:
@@ -219,7 +258,7 @@ def main():
         for i, row in enumerate(data):
             for j in js:
                 if row[j]:
-                    best = canonical.get(variant_key(row[j]))
+                    best = canonical.get(key_fn(row[j]))
                     if best:
                         set_cell(i, j, best, "spelling variant")
 
