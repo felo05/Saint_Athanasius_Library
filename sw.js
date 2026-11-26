@@ -1,4 +1,4 @@
-const CACHE_NAME = 'library-cache-v5';
+const CACHE_NAME = 'library-cache-v6';
 const CORE_ASSETS = [
     './',
     './index.html',

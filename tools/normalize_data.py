@@ -181,6 +181,49 @@ def clean_shelf(value):
     return v
 
 
+# Part markers inside a book title: "ج1", "ج 2", "ج.3", "جزء1", "الجزء 2",
+# "الجزء الأول", "جزء ثاني" ...
+ORDINALS = {
+    "الأول": 1, "الاول": 1, "أول": 1, "اول": 1,
+    "الثاني": 2, "الثانى": 2, "ثاني": 2, "ثانى": 2,
+    "الثالث": 3, "ثالث": 3, "الرابع": 4, "رابع": 4, "الخامس": 5, "خامس": 5,
+    "السادس": 6, "سادس": 6, "السابع": 7, "سابع": 7, "الثامن": 8, "ثامن": 8,
+    "التاسع": 9, "تاسع": 9, "العاشر": 10, "عاشر": 10,
+}
+_ORD = "|".join(sorted(map(re.escape, ORDINALS), key=len, reverse=True))
+PART_MARKER = re.compile(
+    r"(?<![\w])(?:"
+    r"ج\s*\.?\s*(?P<n1>\d+)"                               # ج1  ج 2  ج.3
+    r"|(?:ال)?جزء\s*(?P<n2>\d+)"                           # جزء1  الجزء 2
+    r"|(?:ال)?جزء\s+(?P<w>" + _ORD + r")"                   # الجزء الأول  جزء ثاني
+    r")(?![\w])"
+)
+
+
+def remove_part_from_title(title, part):
+    """If the title names the same part number as the الجزء column, drop it
+    from the title: "تفسير انجيل متى ج1" + part 1 -> "تفسير انجيل متى".
+    Titles with more than one marker, or a different number, are left alone."""
+    if not part.isdigit():
+        return title
+    markers = list(PART_MARKER.finditer(title))
+    if len(markers) != 1:
+        return title
+    m = markers[0]
+    n = m.group("n1") or m.group("n2") or ORDINALS.get(m.group("w"))
+    if int(n) != int(part):
+        return title
+    t = title[:m.start()] + " " + title[m.end():]
+    # Tidy what's left around the removed marker
+    t = re.sub(r"\(\s*\)", " ", t)                          # empty brackets
+    t = re.sub(r"\(\s+", "(", t)
+    t = re.sub(r"\s+\)", ")", t)
+    t = re.sub(r"\s*-\s*(?:-\s*)+", " - ", t)                # "- -" -> "-"
+    t = re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"^[\s\-–:،]+|[\s\-–:،]+$", "", t)           # separators left at the ends
+    return t or title
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--file", default=DATA_FILE)
@@ -228,6 +271,12 @@ def main():
         j = col[name]
         for i in range(len(data)):
             set_cell(i, j, fn(data[i][j]), reasons[name])
+
+    # Part number written in both the title and the الجزء column: keep it in the column only
+    if "اسم الكتاب" in col and "الجزء" in col:
+        jt, jp = col["اسم الكتاب"], col["الجزء"]
+        for i, row in enumerate(data):
+            set_cell(i, jt, remove_part_from_title(row[jt], row[jp]), "part removed from title")
 
     # 3. Unify spelling variants to the most common spelling.
     #    Columns in the same tuple share one vocabulary.
